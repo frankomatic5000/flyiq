@@ -13,25 +13,24 @@ Open `http://localhost:3000`.
 
 ## Environment
 
-Copy `.env.example` to `.env.local` and fill only the services you use:
+Copy `.env.example` to `.env.local` and fill the services you use:
 
 ```bash
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-AMADEUS_API_KEY=
-AMADEUS_API_SECRET=
+OPENAI_API_KEY=              # Optional — falls back to local planner if absent
+ANTHROPIC_API_KEY=           # Optional
+IGNAV_API_KEY=               # Get free key at https://ignav.com/ (1,000 free requests)
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 ```
 
-If `OPENAI_API_KEY` is absent, `/api/agent/chat` falls back to a deterministic local planner. If Amadeus or Supabase env vars are absent, server-side wrappers return clean demo data instead of failing.
+If `OPENAI_API_KEY` is absent, `/api/agent/chat` falls back to a deterministic local planner. If Ignav or Supabase env vars are absent, server-side wrappers return clean demo data instead of failing.
 
 ## Architecture
 
 - Agent layer: `lib/agent/*` classifies messages, plans tool calls, and orchestrates responses.
 - Intelligence layer: `lib/intelligence.ts` encodes booking windows, day patterns, and pricing insights.
-- Search layer: `lib/search/amadeus.ts` keeps Amadeus credentials server-side and returns demo options without env vars.
+- Search layer: `lib/search/ignav.ts` keeps Ignav API credentials server-side and returns demo options without env vars. **Amadeus is NOT used** — their self-service API shuts down July 2026.
 - Memory layer: `lib/memory/supabase.ts` provides server-only preference helpers and stubs.
 - Action layer: `lib/actions/alerts.ts` models price alert creation.
 
