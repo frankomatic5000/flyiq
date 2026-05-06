@@ -1,7 +1,7 @@
 import { setPriceAlert } from "@/lib/actions/alerts";
 import { calculateBookingWindow, dayOfWeekOptimizer, priceInsight } from "@/lib/intelligence";
 import { getUserPreferences } from "@/lib/memory/supabase";
-import { compareNearbyAirports, findCheapestDates, searchFlights } from "@/lib/search/amadeus";
+import { compareNearbyAirports, findCheapestDates, searchFlights } from "@/lib/search/ignav";
 import type { ToolCall } from "./types";
 
 export async function executeToolCall(call: ToolCall) {
