@@ -39,7 +39,7 @@ function ignavHeaders(): Record<string, string> {
     throw new Error("IGNAV_API_KEY not configured");
   }
   return {
-    Authorization: `Bearer ${key}`,
+    "X-Api-Key": key,
     "Content-Type": "application/json",
   };
 }
