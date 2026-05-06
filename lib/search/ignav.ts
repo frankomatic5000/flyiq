@@ -31,7 +31,7 @@ export type Airport = {
   country: string;
 };
 
-const IGNAV_BASE = "https://api.ignav.com/v1";
+const IGNAV_BASE = "https://ignav.com/api";
 
 function ignavHeaders(): Record<string, string> {
   const key = process.env.IGNAV_API_KEY;
@@ -51,24 +51,36 @@ export async function searchFlights(input: FlightSearchInput): Promise<FlightOpt
     return mockFlightOptions(input);
   }
 
-  const url = new URL(`${IGNAV_BASE}/search`);
-  if (input.origin) url.searchParams.set("origin", input.origin);
-  if (input.dest) url.searchParams.set("destination", input.dest);
-  if (input.dates?.depart) url.searchParams.set("departure_date", input.dates.depart);
-  if (input.dates?.return) url.searchParams.set("return_date", input.dates.return);
-  if (input.passengers) url.searchParams.set("passengers", String(input.passengers));
+  const isRoundTrip = Boolean(input.dates?.return);
+  const endpoint = isRoundTrip ? `${IGNAV_BASE}/fares/round-trip` : `${IGNAV_BASE}/fares/one-way`;
+
+  const body: Record<string, unknown> = {
+    origin: input.origin || "JFK",
+    destination: input.dest || "LAX",
+    departure_date: input.dates?.depart || "2026-06-15",
+    adults: input.passengers || 1,
+    cabin_class: "economy",
+    market: "US",
+  };
+
+  if (isRoundTrip && input.dates?.return) {
+    body.return_date = input.dates.return;
+  }
 
   try {
-    const res = await fetch(url.toString(), { headers: ignavHeaders() });
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: ignavHeaders(),
+      body: JSON.stringify(body),
+    });
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`Ignav API error ${res.status}: ${text}`);
     }
     const data = await res.json();
-    return (data.results || []).map(normalizeIgnavResult);
+    return (data.itineraries || []).map((it: Record<string, unknown>) => normalizeItinerary(it, data));
   } catch (err) {
     console.error("[Ignav] search error:", err);
-    // Fallback to mock for graceful degradation
     return mockFlightOptions(input);
   }
 }
@@ -83,7 +95,7 @@ export async function getBookingLink(ignavId: string): Promise<string | null> {
     });
     if (!res.ok) return null;
     const data = await res.json();
-    return data.booking_url || null;
+    return data.booking_url || data.url || null;
   } catch {
     return null;
   }
@@ -103,11 +115,12 @@ export async function searchAirports(query: string): Promise<Airport[]> {
 
   try {
     const url = new URL(`${IGNAV_BASE}/airports`);
-    url.searchParams.set("query", query);
+    url.searchParams.set("q", query);
+    url.searchParams.set("limit", "10");
     const res = await fetch(url.toString(), { headers: ignavHeaders() });
     if (!res.ok) throw new Error(`Ignav airports error ${res.status}`);
     const data = await res.json();
-    return data.results || [];
+    return Array.isArray(data) ? data : (data.results || []);
   } catch (err) {
     console.error("[Ignav] airports error:", err);
     return mockAirports.filter(
@@ -145,28 +158,39 @@ export async function compareNearbyAirports(origin?: string, dest?: string) {
   ];
 }
 
-function normalizeIgnavResult(raw: Record<string, unknown>): FlightOption {
+function normalizeItinerary(it: Record<string, unknown>, parent: Record<string, unknown>): FlightOption {
+  const outbound = (it.outbound || {}) as Record<string, unknown>;
+  const segments = (outbound.segments || []) as Record<string, unknown>[];
+  const firstSegment = segments[0] || {};
+  const lastSegment = segments[segments.length - 1] || {};
+  const price = (it.price || {}) as Record<string, unknown>;
+  const ignavId = String(it.ignav_id || "");
+
+  const airline = String(firstSegment.marketing_carrier_code || outbound.carrier || "Unknown");
+  const flightNumber = String(firstSegment.flight_number || "");
+  const stops = Math.max(0, segments.length - 1);
+
   return {
-    id: String(raw.id || raw.ignav_id || ""),
-    ignavId: String(raw.ignav_id || raw.id || ""),
-    airline: String(raw.airline || ""),
-    flightNumber: String(raw.flight_number || ""),
-    price: Number(raw.price || 0),
-    currency: String(raw.currency || "USD"),
+    id: ignavId,
+    ignavId,
+    airline,
+    flightNumber,
+    price: Number(price.amount || 0),
+    currency: String(price.currency || "USD"),
     depart: {
-      code: String((raw as Record<string, unknown>).departure_airport || ""),
-      date: String((raw as Record<string, unknown>).departure_date || ""),
-      time: String((raw as Record<string, unknown>).departure_time || ""),
+      code: String(firstSegment.departure_airport || parent.origin || ""),
+      date: String(firstSegment.departure_time_local || "").split("T")[0] || "",
+      time: String(firstSegment.departure_time_local || "").split("T")[1]?.slice(0, 5) || "",
     },
     arrival: {
-      code: String((raw as Record<string, unknown>).arrival_airport || ""),
-      date: String((raw as Record<string, unknown>).arrival_date || ""),
-      time: String((raw as Record<string, unknown>).arrival_time || ""),
+      code: String(lastSegment.arrival_airport || parent.destination || ""),
+      date: String(lastSegment.arrival_time_local || "").split("T")[0] || "",
+      time: String(lastSegment.arrival_time_local || "").split("T")[1]?.slice(0, 5) || "",
     },
-    duration: String(raw.duration || ""),
-    stops: Number(raw.stops || 0),
-    cabin: String(raw.cabin || "Economy"),
-    summary: `${raw.airline || "Airline"} from ${(raw as Record<string, unknown>).departure_airport || "?"} to ${(raw as Record<string, unknown>).arrival_airport || "?"} — $${raw.price || "?"}`,
+    duration: String(outbound.duration_minutes ? `${outbound.duration_minutes} min` : ""),
+    stops,
+    cabin: String(it.cabin_class || "economy"),
+    summary: `${airline} ${flightNumber} from ${firstSegment.departure_airport || "?"} to ${lastSegment.arrival_airport || "?"} — $${price.amount || "?"} (${stops === 0 ? "nonstop" : `${stops} stop${stops > 1 ? "s" : ""}`})`,
   };
 }
 
